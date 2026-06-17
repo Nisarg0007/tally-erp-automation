@@ -146,6 +146,7 @@ export default function ReviewPage() {
             <li>• Upload your statement PDF first.</li>
             <li>• Import ledger XML or Excel in Ledgers.</li>
             <li>• Use search to assign debit and credit ledgers.</li>
+            <li>• Select your bank account ledger to auto-fill one side on all rows.</li>
             <li>• Save all changes and mark rows as Approved.</li>
             <li>• Export approved rows from Export page.</li>
           </ul>
