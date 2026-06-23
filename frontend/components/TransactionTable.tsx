@@ -493,7 +493,7 @@ export default function TransactionTable({ transactions, ledgers, onTransactions
           <thead className="bg-slate-100">
             <tr>
               <th className="border-b px-4 py-4 text-sm font-medium text-slate-700">Date</th>
-              <th className="border-b px-4 py-4 text-sm font-medium text-slate-700">Narration</th>
+              <th className="min-w-[14rem] border-b px-4 py-4 text-sm font-medium text-slate-700">Narration</th>
               <th className="border-b px-4 py-4 text-sm font-medium text-slate-700">Amount</th>
               <th className="border-b px-4 py-4 text-sm font-medium text-slate-700">Deposit / Withdraw</th>
               <th className="border-b px-4 py-4 text-sm font-medium text-slate-700">Voucher</th>
@@ -515,9 +515,10 @@ export default function TransactionTable({ transactions, ledgers, onTransactions
                     placeholder="YYYY-MM-DD"
                   />
                 </td>
-                <td className="border-b px-4 py-3 text-sm">
+                <td className="min-w-[14rem] border-b px-4 py-3 text-sm">
                   <textarea
-                    className="min-h-[4rem] w-full resize-none rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none"
+                    className="min-h-[5rem] w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none"
+                    rows={2}
                     value={tx.final_narration ?? tx.narration}
                     onChange={(e) => updateRow(tx.id, "final_narration", e.target.value)}
                     placeholder="Add final narration"

@@ -32,7 +32,7 @@ export default function SettingsPage() {
       });
 
       if (response.data?.success) {
-        setMessage(`Imported ${response.data.imported} ledgers from ${response.data.total} rows.`);
+        setMessage(`Replaced previous ledgers with ${response.data.imported} from the uploaded file.`);
         setTimeout(() => router.push("/review"), 900);
       } else {
         setError("Ledger import failed. Confirm the file format and contents.");

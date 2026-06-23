@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 from database import Base, engine, SessionLocal
 from models import Transaction, Ledger
-from parser import parse_pdf_statement
+from parser import parse_pdf_statement, UnsupportedStatementFormatError
 from schemas import TransactionCreate, TransactionUpdate, TransactionUpdateWithId, BulkTransactionUpdate
 from tally_import import read_ledgers
 
@@ -273,18 +273,14 @@ def parse_ledgers_from_excel(file_path: str) -> List[dict]:
 
 def save_ledger_records(db, ledgers: List[dict]) -> int:
     imported = 0
+    seen_names: set[str] = set()
     for ledger_data in ledgers:
-        if not ledger_data["name"]:
+        name = (ledger_data.get("name") or "").strip()
+        if not name or name in seen_names:
             continue
-        existing = db.query(Ledger).filter(Ledger.name == ledger_data["name"]).first()
-        if existing:
-            if ledger_data["group_name"]:
-                existing.group_name = ledger_data["group_name"]
-        else:
-            db.add(
-                Ledger(name=ledger_data["name"], group_name=ledger_data["group_name"])
-            )
-            imported += 1
+        seen_names.add(name)
+        db.add(Ledger(name=name, group_name=ledger_data.get("group_name") or ""))
+        imported += 1
     return imported
 
 
@@ -319,9 +315,18 @@ async def upload_pdf(file: UploadFile = File(...)):
     if file.filename.lower().endswith(".xml"):
         transactions = parse_exported_xml(file_path)
     elif file.filename.lower().endswith(".pdf"):
-        transactions = parse_pdf_statement(file_path)
+        try:
+            transactions = parse_pdf_statement(file_path)
+        except UnsupportedStatementFormatError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     else:
         raise HTTPException(status_code=400, detail="File must be PDF or XML")
+
+    if not transactions:
+        raise HTTPException(
+            status_code=400,
+            detail="No transactions found in the uploaded file.",
+        )
 
     db = SessionLocal()
 
@@ -510,9 +515,13 @@ async def import_ledgers(file: UploadFile = File(...)):
 
     db = SessionLocal()
     try:
+        db.query(Ledger).delete()
         imported = save_ledger_records(db, ledger_rows)
         db.commit()
         return {"success": True, "imported": imported, "total": len(ledger_rows)}
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
     finally:
         db.close()
 
