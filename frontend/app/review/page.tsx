@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import StepProgress from "@/components/StepProgress";
 import SectionHeader from "@/components/SectionHeader";
 import TransactionTable from "@/components/TransactionTable";
+import { API_BASE_URL } from "@/lib/api";
 import { Transaction } from "@/types/transaction";
 import { Ledger } from "@/types/ledger";
 
@@ -37,7 +38,7 @@ export default function ReviewPage() {
 
   const clearTransactions = async () => {
     try {
-      await axios.delete(`${process.env.NEXT_PUBLIC_API_URL}/transactions`);
+      await axios.delete(`${API_BASE_URL}/transactions`);
       setTransactions([]);
     } catch (exception) {
       console.error(exception);
@@ -50,8 +51,8 @@ export default function ReviewPage() {
 
     try {
       const [transactionsResponse, ledgersResponse] = await Promise.all([
-        axios.get(`${process.env.NEXT_PUBLIC_API_URL}/transactions`),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URL}/ledgers`),
+        axios.get(`${API_BASE_URL}/transactions`),
+        axios.get(`${API_BASE_URL}/ledgers`),
       ]);
 
       setTransactions(transactionsResponse.data);
@@ -69,7 +70,7 @@ export default function ReviewPage() {
     setError(null);
 
     try {
-      await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/transactions`, {
+      await axios.post(`${API_BASE_URL}/transactions`, {
         date: "",
         narration: "",
         transaction_type: "Manual",

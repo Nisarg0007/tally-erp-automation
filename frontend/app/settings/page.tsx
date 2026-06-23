@@ -5,6 +5,7 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import StepProgress from "@/components/StepProgress";
 import SectionHeader from "@/components/SectionHeader";
+import { API_BASE_URL } from "@/lib/api";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -27,7 +28,7 @@ export default function SettingsPage() {
     formData.append("file", file);
 
     try {
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/import-ledgers`, formData, {
+      const response = await axios.post(`${API_BASE_URL}/import-ledgers`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 

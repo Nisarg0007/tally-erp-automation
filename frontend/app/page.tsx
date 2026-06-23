@@ -4,6 +4,7 @@ import axios from "axios";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import StepProgress from "@/components/StepProgress";
+import { API_BASE_URL } from "@/lib/api";
 
 interface Stats {
   total: number;
@@ -18,7 +19,7 @@ export default function Home() {
 
   useEffect(() => {
     axios
-      .get(`${process.env.NEXT_PUBLIC_API_URL}/stats`)
+      .get(`${API_BASE_URL}/stats`)
       .then((response) => setStats(response.data))
       .catch((error) => console.error(error))
       .finally(() => setLoading(false));

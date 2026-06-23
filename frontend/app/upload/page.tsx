@@ -5,6 +5,7 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import StepProgress from "@/components/StepProgress";
 import SectionHeader from "@/components/SectionHeader";
+import { API_BASE_URL } from "@/lib/api";
 
 type ToastType = "success" | "error";
 
@@ -53,7 +54,7 @@ export default function UploadPage() {
       setToast(null);
       setProgress(0);
 
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/upload-pdf`, formData, {
+      const response = await axios.post(`${API_BASE_URL}/upload-pdf`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress: (event) => {
           if (event.total) {

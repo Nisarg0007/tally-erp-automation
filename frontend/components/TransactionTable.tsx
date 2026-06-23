@@ -4,6 +4,7 @@ import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
 
 import { Ledger } from "@/types/ledger";
+import { API_BASE_URL } from "@/lib/api";
 import { Transaction } from "@/types/transaction";
 
 interface Props {
@@ -194,7 +195,7 @@ export default function TransactionTable({ transactions, ledgers, onTransactions
     setToast(null);
 
     try {
-      await axios.delete(`${process.env.NEXT_PUBLIC_API_URL}/transactions/${id}`);
+      await axios.delete(`${API_BASE_URL}/transactions/${id}`);
       const nextRows = rows.filter((row) => row.id !== id);
       setRows(nextRows);
       onTransactionsUpdated(nextRows);
@@ -213,7 +214,7 @@ export default function TransactionTable({ transactions, ledgers, onTransactions
     setToast(null);
 
     try {
-      await axios.delete(`${process.env.NEXT_PUBLIC_API_URL}/transactions`);
+      await axios.delete(`${API_BASE_URL}/transactions`);
       setRows([]);
       onTransactionsUpdated([]);
       showToast("All transactions deleted.", "success");
@@ -230,7 +231,7 @@ export default function TransactionTable({ transactions, ledgers, onTransactions
     setToast(null);
 
     try {
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/transactions`, {
+      const response = await axios.post(`${API_BASE_URL}/transactions`, {
         date: "",
         narration: "",
         transaction_type: "Manual",
@@ -269,7 +270,7 @@ export default function TransactionTable({ transactions, ledgers, onTransactions
     }));
 
     try {
-      const response = await axios.put(`${process.env.NEXT_PUBLIC_API_URL}/transactions/bulk`, {
+      const response = await axios.put(`${API_BASE_URL}/transactions/bulk`, {
         transactions: payloadRows.map((row) => ({
           id: row.id,
           date: row.date,

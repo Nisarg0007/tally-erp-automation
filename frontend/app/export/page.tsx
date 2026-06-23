@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import StepProgress from "@/components/StepProgress";
 import SectionHeader from "@/components/SectionHeader";
+import { API_BASE_URL } from "@/lib/api";
 
 export default function ExportPage() {
   const [message, setMessage] = useState<string | null>(null);
@@ -13,7 +14,7 @@ export default function ExportPage() {
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/stats`);
+        const response = await axios.get(`${API_BASE_URL}/stats`);
         setApprovedCount(response.data.approved ?? 0);
       } catch (error) {
         console.error(error);
@@ -32,7 +33,7 @@ export default function ExportPage() {
       return;
     }
 
-    const url = `${process.env.NEXT_PUBLIC_API_URL}${path}`;
+    const url = `${API_BASE_URL}${path}`;
     window.open(url, "_blank");
   };
 
