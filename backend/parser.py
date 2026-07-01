@@ -19,7 +19,7 @@ PMS_TRANSACTION_PATTERN = re.compile(
     r"([\d,.]+)$"
 )
 DATE_PATTERN = re.compile(
-    r"(?<!\d)(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4})(?!\d)"
+    r"(?<!\d)(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}|\d{2}[A-Za-z]{3,9}\d{4})(?!\d)"
 )
 MONEY_PATTERN = re.compile(r"(?<!\d)\(?-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?\)?(?!\d)")
 
@@ -46,6 +46,23 @@ def is_date_line(line):
     return bool(DATE_PATTERN.search(line.strip()))
 
 
+MONTHS = {
+    "jan": "01",
+    "feb": "02",
+    "mar": "03",
+    "apr": "04",
+    "may": "05",
+    "jun": "06",
+    "jul": "07",
+    "aug": "08",
+    "sep": "09",
+    "sept": "09",
+    "oct": "10",
+    "nov": "11",
+    "dec": "12",
+}
+
+
 def normalize_date(date_string: str) -> str:
     value = date_string.strip()
     if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
@@ -59,6 +76,21 @@ def normalize_date(date_string: str) -> str:
     if re.match(r"^\d{2}/\d{2}/\d{4}$", value):
         day, month, year = value.split("/")
         return f"{day}-{month}-{year}"
+
+    month_match = re.match(r"^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$", value)
+    if month_match:
+        day, month_name, year = month_match.groups()
+        month = MONTHS.get(month_name[:3].lower())
+        if month:
+            day = day.zfill(2)
+            return f"{day}-{month}-{year}"
+
+    month_match = re.match(r"^(\d{2})([A-Za-z]{3,9})(\d{4})$", value)
+    if month_match:
+        day, month_name, year = month_match.groups()
+        month = MONTHS.get(month_name[:3].lower())
+        if month:
+            return f"{day}-{month}-{year}"
 
     return value
 
@@ -106,6 +138,53 @@ def extract_money_tokens(text):
     return [match.group(0) for match in MONEY_PATTERN.finditer(sanitized)]
 
 
+def split_line_columns(line):
+    columns = re.split(r"\s{2,}|\t", line)
+    return [column.strip() for column in columns if column.strip()]
+
+
+def parse_generic_text_row(line):
+    if not line.strip():
+        return None
+
+    if re.search(r"\b(total|opening balance|closing balance|b/f|c/f|carry forward|balance brought forward)\b", line, re.I):
+        return None
+
+    columns = split_line_columns(line)
+    if len(columns) > 1:
+        parsed = parse_table_transaction_row(columns)
+        if parsed:
+            return parsed
+
+    date_match = DATE_PATTERN.search(line)
+    if not date_match:
+        return None
+
+    amounts = extract_money_values(line)
+    if len(amounts) < 2:
+        return None
+
+    date_str = date_match.group(0)
+    amount = abs(amounts[-2])
+    balance = amounts[-1]
+
+    narration = line
+    narration = narration.replace(date_str, "", 1)
+    for token in extract_money_tokens(line):
+        narration = narration.replace(token, " ")
+    narration = re.sub(r"\s+", " ", narration).strip(" -|")
+
+    if not narration:
+        narration = "Transaction"
+
+    return {
+        "date": normalize_date(date_str),
+        "narration": narration,
+        "amount": amount,
+        "balance": balance,
+    }
+
+
 def parse_table_transaction_row(cells):
     row_text = " ".join(cell.strip() for cell in cells if cell)
     if not row_text:
@@ -114,7 +193,12 @@ def parse_table_transaction_row(cells):
     if re.search(r"\b(total|opening balance|closing balance|b/f|c/f|carry forward|balance brought forward)\b", row_text, re.I):
         return None
 
-    date_match = DATE_PATTERN.search(row_text)
+    date_match = None
+    for cell in cells:
+        if cell and DATE_PATTERN.search(cell):
+            date_match = DATE_PATTERN.search(cell)
+            break
+
     if not date_match:
         return None
 
@@ -126,7 +210,7 @@ def parse_table_transaction_row(cells):
     balance = money_cells[-1]
     amount = abs(money_cells[-2])
     if len(money_cells) > 2:
-        nonzero = [abs(amount) for amount in money_cells[:-1] if amount != 0]
+        nonzero = [abs(num) for num in money_cells[:-1] if num != 0]
         if nonzero:
             amount = nonzero[-1]
 
@@ -338,10 +422,9 @@ def parse_generic_bank_statement(pdf_path):
                 continue
 
             lines = [line.strip() for line in text.split("\n") if line.strip()]
-            blocks = parse_generic_transaction_blocks(lines)
 
-            for block in blocks:
-                parsed = build_generic_transaction(block)
+            for line in lines:
+                parsed = parse_generic_text_row(line)
                 if parsed is None:
                     continue
 
@@ -350,6 +433,19 @@ def parse_generic_bank_statement(pdf_path):
                     continue
 
                 transactions.append(parsed)
+
+            if not transactions:
+                blocks = parse_generic_transaction_blocks(lines)
+                for block in blocks:
+                    parsed = build_generic_transaction(block)
+                    if parsed is None:
+                        continue
+
+                    if "opening_balance" in parsed:
+                        opening_balance = parsed["opening_balance"]
+                        continue
+
+                    transactions.append(parsed)
 
     return infer_transaction_types(transactions, opening_balance)
 

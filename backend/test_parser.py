@@ -8,6 +8,7 @@ from parser import (
     build_generic_transaction,
     infer_transaction_types,
     parse_generic_transaction_blocks,
+    parse_generic_text_row,
     parse_table_transaction_row,
 )
 
@@ -72,6 +73,26 @@ class ParserTests(unittest.TestCase):
     def test_parse_table_transaction_row_skips_total_rows(self):
         cells = ["Total", "", "1,000.00", "10,000.00"]
         self.assertIsNone(parse_table_transaction_row(cells))
+
+    def test_parse_generic_text_row_with_simple_columns(self):
+        line = "01-07-2024 UPI PAYMENT TO SHOP 100.00 5,000.00"
+        parsed = parse_generic_text_row(line)
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["date"], "01-07-2024")
+        self.assertEqual(parsed["amount"], 100.0)
+        self.assertEqual(parsed["balance"], 5000.0)
+        self.assertEqual(parsed["narration"], "UPI PAYMENT TO SHOP")
+
+    def test_parse_generic_text_row_with_month_name(self):
+        line = "1 July 2024 ATM WITHDRAWAL 200.00 4,800.00"
+        parsed = parse_generic_text_row(line)
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["date"], "01-07-2024")
+        self.assertEqual(parsed["amount"], 200.0)
+        self.assertEqual(parsed["balance"], 4800.0)
+        self.assertIn("ATM WITHDRAWAL", parsed["narration"])
 
 
 if __name__ == "__main__":
