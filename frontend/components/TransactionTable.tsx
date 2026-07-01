@@ -137,30 +137,43 @@ export default function TransactionTable({ transactions, ledgers, onTransactions
     );
   };
 
-  const normalizeDateForInput = (date: string | null | undefined) => {
+  const formatDateValue = (date: string | null | undefined) => {
     if (!date) {
       return "";
     }
 
-    const isoMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const trimmed = date.trim();
+    if (!trimmed) {
+      return "";
+    }
+
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (isoMatch) {
-      return date;
+      const [, year, month, day] = isoMatch;
+      return `${day}-${month}-${year}`;
     }
 
-    const dmyMatch = date.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    const dmyMatch = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})$/);
     if (dmyMatch) {
-      const [, day, month, year] = dmyMatch;
-      return `${year}-${month}-${day}`;
+      return trimmed;
     }
 
-    const dmySlashMatch = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    const dmySlashMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
     if (dmySlashMatch) {
       const [, day, month, year] = dmySlashMatch;
-      return `${year}-${month}-${day}`;
+      return `${day}-${month}-${year}`;
     }
 
-    return date;
+    const ymdSlashMatch = trimmed.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+    if (ymdSlashMatch) {
+      const [, year, month, day] = ymdSlashMatch;
+      return `${day}-${month}-${year}`;
+    }
+
+    return trimmed;
   };
+
+  const normalizeDateForInput = (date: string | null | undefined) => formatDateValue(date);
 
   const formatAmount = (amount: string | number | null | undefined) => {
     if (amount === null || amount === undefined || amount === "") {
@@ -509,11 +522,14 @@ export default function TransactionTable({ transactions, ledgers, onTransactions
               <tr key={tx.id} className="even:bg-slate-50">
                 <td className="border-b px-4 py-3 text-sm text-slate-700">
                   <input
-                    type="date"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\\d{2}-\\d{2}-\\d{4}"
+                    maxLength={10}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none"
                     value={normalizeDateForInput(tx.date)}
-                    onChange={(e) => updateRow(tx.id, "date", e.target.value)}
-                    placeholder="YYYY-MM-DD"
+                    onChange={(e) => updateRow(tx.id, "date", formatDateValue(e.target.value))}
+                    placeholder="DD-MM-YYYY"
                   />
                 </td>
                 <td className="min-w-[14rem] border-b px-4 py-3 text-sm">
