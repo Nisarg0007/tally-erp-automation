@@ -153,7 +153,32 @@ def normalize_date_for_tally(date_string: str) -> str:
     return ""
 
 
+def validate_transactions_for_export(transactions: List[Transaction]) -> None:
+    errors = []
+
+    for index, transaction in enumerate(transactions, start=1):
+        voucher_type = (transaction.voucher_type or "").strip()
+        debit_ledger = (transaction.debit_ledger or "").strip()
+        credit_ledger = (transaction.credit_ledger or "").strip()
+        amount = float(transaction.amount or 0.0)
+
+        if not voucher_type:
+            errors.append(f"Transaction {index}: voucher type is required")
+        if not debit_ledger:
+            errors.append(f"Transaction {index}: debit ledger is required")
+        if not credit_ledger:
+            errors.append(f"Transaction {index}: credit ledger is required")
+        if debit_ledger and credit_ledger and debit_ledger == credit_ledger:
+            errors.append(f"Transaction {index}: debit and credit ledger cannot be the same ledger")
+        if amount <= 0:
+            errors.append(f"Transaction {index}: amount must be greater than zero")
+
+    if errors:
+        raise ValueError("; ".join(errors))
+
+
 def build_tally_xml(transactions: List[Transaction]) -> bytes:
+    validate_transactions_for_export(transactions)
     envelope = ET.Element("ENVELOPE")
     header = ET.SubElement(envelope, "HEADER")
     ET.SubElement(header, "TALLYREQUEST").text = "Import Data"
@@ -170,7 +195,11 @@ def build_tally_xml(transactions: List[Transaction]) -> bytes:
         message = ET.SubElement(request_data, "TALLYMESSAGE")
         message.attrib["xmlns:UDF"] = "TallyUDF"
 
-        voucher_type = transaction.voucher_type or "Journal"
+        voucher_type = (transaction.voucher_type or "Journal").strip()
+        debit_ledger = (transaction.debit_ledger or "").strip()
+        credit_ledger = (transaction.credit_ledger or "").strip()
+        amount = abs(float(transaction.amount or 0.0))
+
         voucher = ET.SubElement(
             message,
             "VOUCHER",
@@ -189,14 +218,14 @@ def build_tally_xml(transactions: List[Transaction]) -> bytes:
         ET.SubElement(voucher, "EFFECTIVEDATE").text = normalize_date_for_tally(transaction.date)
 
         debit_entry = ET.SubElement(voucher, "ALLLEDGERENTRIES.LIST")
-        ET.SubElement(debit_entry, "LEDGERNAME").text = transaction.debit_ledger or ""
+        ET.SubElement(debit_entry, "LEDGERNAME").text = debit_ledger
         ET.SubElement(debit_entry, "ISDEEMEDPOSITIVE").text = "No"
-        ET.SubElement(debit_entry, "AMOUNT").text = f"{(transaction.amount or 0.0):.2f}"
+        ET.SubElement(debit_entry, "AMOUNT").text = f"{amount:.2f}"
 
         credit_entry = ET.SubElement(voucher, "ALLLEDGERENTRIES.LIST")
-        ET.SubElement(credit_entry, "LEDGERNAME").text = transaction.credit_ledger or ""
+        ET.SubElement(credit_entry, "LEDGERNAME").text = credit_ledger
         ET.SubElement(credit_entry, "ISDEEMEDPOSITIVE").text = "Yes"
-        ET.SubElement(credit_entry, "AMOUNT").text = f"{(-(transaction.amount or 0.0)):.2f}"
+        ET.SubElement(credit_entry, "AMOUNT").text = f"{-amount:.2f}"
 
     return ET.tostring(envelope, encoding="utf-8", xml_declaration=True)
 
@@ -559,7 +588,11 @@ def export_tally_xml():
         if not transactions:
             raise HTTPException(status_code=404, detail="No approved transactions available for export")
 
-        payload = build_tally_xml(transactions)
+        try:
+            payload = build_tally_xml(transactions)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         return StreamingResponse(
             BytesIO(payload),
             media_type="application/xml",
