@@ -49,8 +49,8 @@ export default function UploadPage() {
     }
 
     const extension = selectedFile.name.split(".").pop()?.toLowerCase();
-    if (extension !== "pdf" && extension !== "xml") {
-      setToast({ message: "Please upload a PDF or XML file.", type: "error" });
+    if (extension !== "pdf" && extension !== "xml" && extension !== "xlsx" && extension !== "xls") {
+      setToast({ message: "Please upload a PDF, Excel, or XML file.", type: "error" });
       return;
     }
 
@@ -77,7 +77,7 @@ export default function UploadPage() {
 
   const uploadFile = async () => {
     if (!file) {
-      setToast({ message: "Select a PDF or XML file before uploading.", type: "error" });
+      setToast({ message: "Select a PDF, Excel, or XML file before uploading.", type: "error" });
       return;
     }
 
@@ -118,21 +118,21 @@ export default function UploadPage() {
       <SectionHeader
         badge="Step 1"
         title="Upload your bank statement"
-        description="Upload an ICICI bank statement PDF, a Care PMS transaction statement PDF, or previously exported XML. Existing rows are replaced each time so you can start fresh."
+        description="Upload an ICICI bank statement PDF, a trade book PDF/Excel export, a Care PMS transaction statement PDF, or previously exported XML. Existing rows are replaced each time so you can start fresh."
       />
       <section className="rounded-[2rem] bg-white p-8 shadow-xl shadow-slate-200/40">
         <div className="space-y-4">
           <p className="text-sm uppercase tracking-[0.3em] text-indigo-600">Upload</p>
           <h1 className="text-4xl font-semibold text-slate-900">Upload bank statement</h1>
           <p className="max-w-3xl text-base leading-7 text-slate-600">
-            Supported PDFs: ICICI savings account statements and Care Portfolio Managers (PMS) transaction
+            Supported files: ICICI savings account PDFs, trade book PDF/Excel exports, and Care Portfolio Managers (PMS) transaction
             statements. You can also upload a previously exported XML file. Existing transaction rows are replaced
             on every upload.
           </p>
         </div>
 
         <div className="mt-8 rounded-[1.75rem] border border-slate-200 bg-slate-50 p-6">
-          <label className="block text-sm font-medium text-slate-700">Statement PDF or XML</label>
+          <label className="block text-sm font-medium text-slate-700">Statement PDF, Excel, or XML</label>
 
           <div
             onClick={() => fileInputRef.current?.click()}
@@ -152,7 +152,7 @@ export default function UploadPage() {
             <p className="mt-4 text-sm font-semibold text-slate-800">
               {dragActive ? "Drop your file here" : "Drag and drop your file here, or click to browse"}
             </p>
-            <p className="mt-2 text-sm text-slate-500">Accepted formats: PDF or XML</p>
+            <p className="mt-2 text-sm text-slate-500">Accepted formats: PDF, Excel (.xlsx), or XML</p>
             {file ? (
               <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
                 <p className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-700">
@@ -177,7 +177,7 @@ export default function UploadPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.xml"
+            accept=".pdf,.xml,.xlsx,.xls"
             onChange={(e) => handleFileSelection(e.target.files?.[0] || null)}
             className="hidden"
           />

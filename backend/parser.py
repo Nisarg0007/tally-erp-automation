@@ -1,5 +1,8 @@
 import pdfplumber
 import re
+from datetime import date, datetime
+
+from openpyxl import load_workbook
 
 
 class UnsupportedStatementFormatError(Exception):
@@ -19,9 +22,80 @@ PMS_TRANSACTION_PATTERN = re.compile(
     r"([\d,.]+)$"
 )
 DATE_PATTERN = re.compile(
-    r"(?<!\d)(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}|\d{2}[A-Za-z]{3,9}\d{4})(?!\d)"
+    r"(?<!\d)(\d{2}[-/.]\d{2}[-/.]\d{4}|\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}|\d{2}[A-Za-z]{3,9}\d{4})(?!\d)"
+)
+ICICI_OP_TXN_LINE = re.compile(
+    r"^(\d+)\s+"
+    r"(\d{2}\.\d{2}\.\d{4})\s+"
+    r"(?:(\d+)\s+)?"
+    r"([\d,.]+)\s+"
+    r"([\d,.]+)$"
+)
+ICICI_OP_STATEMENT_MARKER = re.compile(
+    r"statement of transactions in sav(?:ing|ings)? account",
+    re.I,
+)
+ICICI_OP_TXN_IN_TEXT = re.compile(
+    r"\b\d+\s+\d{2}\.\d{2}\.\d{4}\s+(?:\d+\s+)?[\d,.]+\s+[\d,.]+\b"
+)
+ICICI_OP_SKIP_LINE_MARKERS = (
+    "Statement of Transactions",
+    "Transaction Withdrawal",
+    "S No.",
+    "Date Amount",
+    "www.icici",
+    "Please call",
+    "Never share",
+    "Legends for",
+    "Sincerly",
+    "Team ICICI",
+    "system generated",
+    "RCHG -",
+    "PAVC -",
+    "SMO -",
+    "DTAX -",
+    "BPAY -",
+    "IDTX -",
+    "BBPS -",
+    "INFT -",
+    "BIL -",
+    "ONL -",
+    "NEFT -",
+    "EBA -",
+    "SGB -",
+    "PAC -",
+    "LNPY -",
+    "TOP -",
+    "CCWD -",
+    "BCTT -",
+    "PAYC -",
+    "IMPS -",
+    "VAT/MAT/NFS -",
+    "ATM MMT -",
+    "INF -",
+    "T Chg -",
+    "UCCBRN CMS -",
+    "LCCBRN CMS -",
+    "N chg -",
+    "Fund transfer)",
+    "Your Base Branch",
+    "Dial your Bank",
 )
 MONEY_PATTERN = re.compile(r"(?<!\d)\(?-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?\)?(?!\d)")
+TRADE_BOOK_HEADER = re.compile(
+    r"Date\s+Stock\s+Action\s+Qty\s+Price\s+Total",
+    re.I,
+)
+TRADE_BOOK_ROW = re.compile(
+    r"^(\d{1,2}-[A-Za-z]{3}-\d{2})\s+"
+    r"(\S+)\s+"
+    r"(Buy|Sell)\s+"
+    r"([\d,.]+)\s+"
+    r"([\d,.]+)\s+"
+    r"([\d,.]+)$",
+    re.I,
+)
+TRADE_BOOK_HEADER_COLUMNS = ("date", "stock", "action", "qty", "price", "total")
 
 
 def clean_amount(value):
@@ -77,6 +151,10 @@ def normalize_date(date_string: str) -> str:
         day, month, year = value.split("/")
         return f"{day}-{month}-{year}"
 
+    if re.match(r"^\d{2}\.\d{2}\.\d{4}$", value):
+        day, month, year = value.split(".")
+        return f"{day}-{month}-{year}"
+
     month_match = re.match(r"^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$", value)
     if month_match:
         day, month_name, year = month_match.groups()
@@ -91,6 +169,16 @@ def normalize_date(date_string: str) -> str:
         month = MONTHS.get(month_name[:3].lower())
         if month:
             return f"{day}-{month}-{year}"
+
+    month_match = re.match(r"^(\d{1,2})-([A-Za-z]{3})-(\d{2})$", value, re.I)
+    if month_match:
+        day, month_name, year_short = month_match.groups()
+        month = MONTHS.get(month_name[:3].lower())
+        if month:
+            year = int(year_short)
+            if year < 100:
+                year += 2000
+            return f"{day.zfill(2)}-{month}-{year}"
 
     return value
 
@@ -334,6 +422,104 @@ def build_generic_transaction(block, opening_balance=None):
     }
 
 
+def is_icici_op_transaction_statement(full_text):
+    return bool(
+        ICICI_OP_STATEMENT_MARKER.search(full_text)
+        and ICICI_OP_TXN_IN_TEXT.search(full_text)
+    )
+
+
+def should_skip_icici_op_line(line):
+    if not line.strip():
+        return True
+
+    if re.match(r"^\d+$", line.strip()):
+        return True
+
+    return any(marker in line for marker in ICICI_OP_SKIP_LINE_MARKERS)
+
+
+def extract_icici_op_transaction_lines(pdf_path):
+    lines = []
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if not text:
+                continue
+
+            for raw_line in text.split("\n"):
+                line = raw_line.strip()
+                if should_skip_icici_op_line(line):
+                    continue
+                lines.append(line)
+
+    return lines
+
+
+def build_icici_op_transaction(lines, txn_index, txn_indices):
+    txn_line_index = txn_indices[txn_index]
+    match = ICICI_OP_TXN_LINE.match(lines[txn_line_index])
+    if not match:
+        return None
+
+    _, date_str, cheque_number, amount_str, balance_str = match.groups()
+    next_txn_line_index = (
+        txn_indices[txn_index + 1]
+        if txn_index + 1 < len(txn_indices)
+        else len(lines)
+    )
+
+    narration_parts = []
+    if txn_index == 0 and txn_line_index > 0:
+        narration_parts.append(lines[txn_line_index - 1])
+
+    if txn_index > 0:
+        previous_txn_line_index = txn_indices[txn_index - 1]
+        previous_between = lines[previous_txn_line_index + 1:txn_line_index]
+        if previous_between:
+            narration_parts.append(previous_between[-1])
+
+    between_lines = lines[txn_line_index + 1:next_txn_line_index]
+    if between_lines:
+        if txn_index + 1 < len(txn_indices):
+            narration_parts.extend(between_lines[:-1])
+        else:
+            narration_parts.extend(
+                line for line in between_lines if not should_skip_icici_op_line(line)
+            )
+
+    narration = re.sub(r"\s+", " ", " ".join(narration_parts)).strip()
+    if cheque_number:
+        narration = f"Chq {cheque_number} {narration}".strip()
+    if not narration:
+        narration = "Transaction"
+
+    return {
+        "date": normalize_date(date_str),
+        "narration": narration,
+        "amount": clean_amount(amount_str),
+        "balance": clean_amount(balance_str),
+    }
+
+
+def parse_icici_op_transaction_statement(pdf_path):
+    lines = extract_icici_op_transaction_lines(pdf_path)
+    txn_indices = [
+        index
+        for index, line in enumerate(lines)
+        if ICICI_OP_TXN_LINE.match(line)
+    ]
+
+    transactions = []
+    for txn_index in range(len(txn_indices)):
+        parsed = build_icici_op_transaction(lines, txn_index, txn_indices)
+        if parsed and parsed["amount"] is not None and parsed["balance"] is not None:
+            transactions.append(parsed)
+
+    return infer_transaction_types(transactions)
+
+
 def parse_icici_savings_statement(pdf_path):
     transactions = []
     lines = []
@@ -348,7 +534,7 @@ def parse_icici_savings_statement(pdf_path):
             for line in text.split("\n"):
                 line = line.strip()
 
-                if "Statement of Transactions in Savings Account" in line:
+                if re.search(r"Statement of Transactions in Sav(?:ing|ings) Account", line):
                     inside_transactions = True
                     continue
 
@@ -405,6 +591,148 @@ def parse_pms_transaction_statement(pdf_path):
                 })
 
     return transactions
+
+
+def is_trade_book_statement(full_text):
+    return bool(
+        TRADE_BOOK_HEADER.search(full_text)
+        or TRADE_BOOK_ROW.search(full_text)
+    )
+
+
+def build_trade_book_transaction(date_str, stock, action, qty, price, total):
+    amount = clean_amount(total)
+    if amount is None:
+        return None
+
+    side = action.strip().capitalize()
+    if side not in {"Buy", "Sell"}:
+        return None
+
+    return {
+        "date": normalize_date(str(date_str).strip()),
+        "narration": f"{side} {stock.strip()} Qty {qty} @ {price}",
+        "amount": amount,
+        "balance": 0,
+        "transaction_type": "deposit" if side == "Sell" else "withdrawal",
+    }
+
+
+def parse_trade_book_line(line):
+    match = TRADE_BOOK_ROW.match(line.strip())
+    if not match:
+        return None
+    return build_trade_book_transaction(*match.groups())
+
+
+def parse_trade_book_pdf(pdf_path):
+    transactions = []
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if not text:
+                continue
+
+            for line in text.split("\n"):
+                parsed = parse_trade_book_line(line)
+                if parsed:
+                    transactions.append(parsed)
+
+    return transactions
+
+
+def normalize_trade_book_header(value):
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def find_trade_book_columns(rows):
+    for row_index, row in enumerate(rows):
+        headers = [normalize_trade_book_header(cell) for cell in row]
+        if not headers:
+            continue
+
+        column_map = {}
+        for column_name in TRADE_BOOK_HEADER_COLUMNS:
+            try:
+                column_map[column_name] = headers.index(column_name)
+            except ValueError:
+                column_map[column_name] = None
+
+        if (
+            column_map["date"] is not None
+            and column_map["stock"] is not None
+            and column_map["action"] is not None
+            and column_map["total"] is not None
+        ):
+            return row_index, column_map
+
+    return None, None
+
+
+def format_trade_book_date(value):
+    if isinstance(value, datetime):
+        return normalize_date(value.strftime("%d-%b-%y"))
+    if isinstance(value, date):
+        return normalize_date(value.strftime("%d-%b-%y"))
+    return normalize_date(str(value).strip())
+
+
+def parse_trade_book_excel(file_path):
+    workbook = load_workbook(file_path, read_only=True, data_only=True)
+    worksheet = workbook.active
+    rows = list(worksheet.iter_rows(values_only=True))
+    workbook.close()
+
+    header_row, columns = find_trade_book_columns(rows)
+    if header_row is None or columns is None:
+        return []
+
+    transactions = []
+    for row in rows[header_row + 1:]:
+        if not row or all(cell is None or str(cell).strip() == "" for cell in row):
+            continue
+
+        try:
+            date_value = row[columns["date"]]
+            stock_value = row[columns["stock"]]
+            action_value = row[columns["action"]]
+            qty_value = row[columns["qty"]] if columns["qty"] is not None else ""
+            price_value = row[columns["price"]] if columns["price"] is not None else ""
+            total_value = row[columns["total"]]
+        except IndexError:
+            continue
+
+        if date_value is None or action_value is None or total_value is None:
+            continue
+
+        parsed = build_trade_book_transaction(
+            format_trade_book_date(date_value),
+            str(stock_value or "").strip(),
+            str(action_value).strip(),
+            str(qty_value or "").strip(),
+            str(price_value or "").strip(),
+            str(total_value).strip(),
+        )
+        if parsed:
+            transactions.append(parsed)
+
+    return transactions
+
+
+def parse_excel_statement(file_path):
+    if file_path.lower().endswith(".xls") and not file_path.lower().endswith(".xlsx"):
+        raise UnsupportedStatementFormatError(
+            "Legacy .xls files are not supported. Save the trade book as .xlsx and upload again."
+        )
+
+    transactions = parse_trade_book_excel(file_path)
+    if transactions:
+        return transactions
+
+    raise UnsupportedStatementFormatError(
+        "Unsupported Excel format. Supported Excel format: trade book with Date, Stock, Action, Qty, Price, and Total columns."
+    )
 
 
 def parse_generic_bank_statement(pdf_path):
@@ -468,6 +796,14 @@ def parse_pdf_statement(pdf_path):
             "Could not read any text from this PDF. The file may be scanned or password protected."
         )
 
+    if is_icici_op_transaction_statement(full_text):
+        transactions = parse_icici_op_transaction_statement(pdf_path)
+        if transactions:
+            return transactions
+        raise UnsupportedStatementFormatError(
+            "ICICI transaction statement detected, but no transactions could be extracted."
+        )
+
     if re.search(r"statement of transactions", full_text, re.I) or re.search(r"account statement", full_text, re.I):
         transactions = parse_icici_savings_statement(pdf_path)
         if transactions:
@@ -487,11 +823,19 @@ def parse_pdf_statement(pdf_path):
                 "PMS transaction statement detected, but no transactions could be extracted."
             )
 
+    if is_trade_book_statement(full_text):
+        transactions = parse_trade_book_pdf(pdf_path)
+        if transactions:
+            return transactions
+        raise UnsupportedStatementFormatError(
+            "Trade book statement detected, but no transactions could be extracted."
+        )
+
     transactions = parse_generic_bank_statement(pdf_path)
     if transactions:
         return transactions
 
     raise UnsupportedStatementFormatError(
         "Unsupported statement format. Supported formats: ICICI-style account statements, "
-        "PMS transaction statements, and other date/narration/amount/balance bank statements."
+        "PMS transaction statements, trade book tables, and other date/narration/amount/balance bank statements."
     )

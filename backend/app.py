@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 from database import Base, engine, SessionLocal
 from models import Transaction, Ledger
-from parser import parse_pdf_statement, UnsupportedStatementFormatError
+from parser import parse_pdf_statement, parse_excel_statement, UnsupportedStatementFormatError
 from schemas import TransactionCreate, TransactionUpdate, TransactionUpdateWithId, BulkTransactionUpdate
 from tally_import import read_ledgers
 
@@ -320,8 +320,13 @@ async def upload_pdf(file: UploadFile = File(...)):
             transactions = parse_pdf_statement(file_path)
         except UnsupportedStatementFormatError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+    elif file.filename.lower().endswith((".xlsx", ".xls")):
+        try:
+            transactions = parse_excel_statement(file_path)
+        except UnsupportedStatementFormatError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     else:
-        raise HTTPException(status_code=400, detail="File must be PDF or XML")
+        raise HTTPException(status_code=400, detail="File must be PDF, Excel, or XML")
 
     if not transactions:
         raise HTTPException(
@@ -344,7 +349,13 @@ async def upload_pdf(file: UploadFile = File(...)):
                 debit_ledger=tx.get("debit_ledger"),
                 credit_ledger=tx.get("credit_ledger"),
                 final_narration=tx.get("final_narration"),
-                source="pdf" if file.filename.lower().endswith(".pdf") else "xml",
+                source=(
+                    "xml"
+                    if file.filename.lower().endswith(".xml")
+                    else "excel"
+                    if file.filename.lower().endswith((".xlsx", ".xls"))
+                    else "pdf"
+                ),
             )
             db.add(db_transaction)
         db.commit()
