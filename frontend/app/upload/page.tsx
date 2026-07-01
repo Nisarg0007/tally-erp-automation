@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import StepProgress from "@/components/StepProgress";
@@ -26,10 +26,12 @@ function getUploadErrorMessage(error: unknown) {
 
 export default function UploadPage() {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
     if (!toast) {
@@ -39,6 +41,39 @@ export default function UploadPage() {
     const timer = window.setTimeout(() => setToast(null), 6000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  const handleFileSelection = (selectedFile: File | null) => {
+    if (!selectedFile) {
+      setFile(null);
+      return;
+    }
+
+    const extension = selectedFile.name.split(".").pop()?.toLowerCase();
+    if (extension !== "pdf" && extension !== "xml") {
+      setToast({ message: "Please upload a PDF or XML file.", type: "error" });
+      return;
+    }
+
+    setFile(selectedFile);
+    setToast(null);
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(true);
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+    const droppedFile = event.dataTransfer.files?.[0] || null;
+    handleFileSelection(droppedFile);
+  };
 
   const uploadFile = async () => {
     if (!file) {
@@ -98,11 +133,53 @@ export default function UploadPage() {
 
         <div className="mt-8 rounded-[1.75rem] border border-slate-200 bg-slate-50 p-6">
           <label className="block text-sm font-medium text-slate-700">Statement PDF or XML</label>
+
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`mt-3 flex cursor-pointer flex-col items-center justify-center rounded-[1.5rem] border-2 border-dashed px-6 py-10 text-center transition ${
+              dragActive
+                ? "border-indigo-500 bg-indigo-50"
+                : "border-slate-300 bg-white hover:border-indigo-400 hover:bg-slate-50"
+            }`}
+          >
+            <svg className="h-10 w-10 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 0 1-.88-7.9A5.5 5.5 0 0 1 19 9.5a5.5 5.5 0 0 1-1.1 10.9H7Z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="m12 13 2.5 2.5M12 13l-2.5 2.5M12 13v8" />
+            </svg>
+            <p className="mt-4 text-sm font-semibold text-slate-800">
+              {dragActive ? "Drop your file here" : "Drag and drop your file here, or click to browse"}
+            </p>
+            <p className="mt-2 text-sm text-slate-500">Accepted formats: PDF or XML</p>
+            {file ? (
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                <p className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-700">
+                  Selected: {file.name}
+                </p>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleFileSelection(null);
+                  }}
+                  className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-slate-400">No file selected yet</p>
+            )}
+          </div>
+
           <input
+            ref={fileInputRef}
             type="file"
             accept=".pdf,.xml"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-            className="mt-3 block w-full rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 shadow-sm focus:border-indigo-500 focus:outline-none"
+            onChange={(e) => handleFileSelection(e.target.files?.[0] || null)}
+            className="hidden"
           />
 
           <div className="mt-6 grid gap-4 sm:grid-cols-[1fr_auto]">
