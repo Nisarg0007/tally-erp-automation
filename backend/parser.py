@@ -21,15 +21,19 @@ PMS_TRANSACTION_PATTERN = re.compile(
 DATE_PATTERN = re.compile(
     r"(?<!\d)(\d{2}[-/]\d{2}[-/]\d{4}|\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4})(?!\d)"
 )
-MONEY_PATTERN = re.compile(r"(?<!\d)(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?(?!\d)")
+MONEY_PATTERN = re.compile(r"(?<!\d)\(?-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?\)?(?!\d)")
 
 
 def clean_amount(value):
     if value is None:
         return None
 
-    cleaned = re.sub(r"[^0-9.\-]", "", str(value))
-    if not cleaned:
+    text = str(value).strip()
+    if text.startswith("(") and text.endswith(")"):
+        text = f"-{text[1:-1]}"
+
+    cleaned = re.sub(r"[^0-9.\-]", "", text)
+    if not cleaned or cleaned == "-":
         return None
 
     try:
@@ -100,6 +104,87 @@ def extract_money_values(text):
 def extract_money_tokens(text):
     sanitized = re.sub(DATE_PATTERN, " ", text)
     return [match.group(0) for match in MONEY_PATTERN.finditer(sanitized)]
+
+
+def parse_table_transaction_row(cells):
+    row_text = " ".join(cell.strip() for cell in cells if cell)
+    if not row_text:
+        return None
+
+    if re.search(r"\b(total|opening balance|closing balance|b/f|c/f|carry forward|balance brought forward)\b", row_text, re.I):
+        return None
+
+    date_match = DATE_PATTERN.search(row_text)
+    if not date_match:
+        return None
+
+    money_cells = [clean_amount(cell) for cell in cells if cell and MONEY_PATTERN.search(cell)]
+    money_cells = [amount for amount in money_cells if amount is not None]
+    if len(money_cells) < 2:
+        return None
+
+    balance = money_cells[-1]
+    amount = abs(money_cells[-2])
+    if len(money_cells) > 2:
+        nonzero = [abs(amount) for amount in money_cells[:-1] if amount != 0]
+        if nonzero:
+            amount = nonzero[-1]
+
+    date_str = date_match.group(0)
+    narration_parts = []
+    for cell in cells:
+        if not cell:
+            continue
+        if DATE_PATTERN.search(cell) or MONEY_PATTERN.search(cell):
+            continue
+        narration_parts.append(cell)
+
+    narration = " ".join(narration_parts).strip()
+    if not narration:
+        narration = row_text
+        narration = narration.replace(date_str, "", 1)
+        for token in extract_money_tokens(row_text):
+            narration = narration.replace(token, " ")
+        narration = re.sub(r"\s+", " ", narration).strip(" -|")
+
+    if not narration:
+        narration = "Transaction"
+
+    return {
+        "date": normalize_date(date_str),
+        "narration": narration,
+        "amount": amount,
+        "balance": balance,
+    }
+
+
+def parse_table_bank_statement(pdf_path):
+    transactions = []
+    opening_balance = None
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            for table in tables:
+                if not table:
+                    continue
+
+                for row in table:
+                    if not any(cell and str(cell).strip() for cell in row):
+                        continue
+
+                    cells = [str(cell).strip() if cell is not None else "" for cell in row]
+                    parsed = parse_table_transaction_row(cells)
+                    if parsed is None:
+                        continue
+
+                    if "opening_balance" in parsed:
+                        opening_balance = parsed["opening_balance"]
+                        continue
+
+                    transactions.append(parsed)
+
+    return infer_transaction_types(transactions, opening_balance)
 
 
 def parse_generic_transaction_blocks(lines):
@@ -239,6 +324,10 @@ def parse_pms_transaction_statement(pdf_path):
 
 
 def parse_generic_bank_statement(pdf_path):
+    table_transactions = parse_table_bank_statement(pdf_path)
+    if table_transactions:
+        return table_transactions
+
     transactions = []
     opening_balance = None
 
@@ -302,10 +391,9 @@ def parse_pdf_statement(pdf_path):
                 "PMS transaction statement detected, but no transactions could be extracted."
             )
 
-    if re.search(r"\b(balance|deposit|withdrawal|debit|credit|transaction)\b", full_text, re.I):
-        transactions = parse_generic_bank_statement(pdf_path)
-        if transactions:
-            return transactions
+    transactions = parse_generic_bank_statement(pdf_path)
+    if transactions:
+        return transactions
 
     raise UnsupportedStatementFormatError(
         "Unsupported statement format. Supported formats: ICICI-style account statements, "
