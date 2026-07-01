@@ -36,12 +36,18 @@ class TallyExportTests(unittest.TestCase):
         credit_entry = entries[1]
 
         self.assertEqual(debit_entry.findtext("LEDGERNAME"), "Bank Account")
-        self.assertEqual(debit_entry.findtext("ISDEEMEDPOSITIVE"), "No")
-        self.assertEqual(debit_entry.findtext("AMOUNT"), "1500.00")
+        self.assertEqual(debit_entry.findtext("ISDEEMEDPOSITIVE"), "Yes")
+        self.assertEqual(debit_entry.findtext("AMOUNT"), "-1500.00")
+        self.assertEqual(debit_entry.findtext("LEDGERFROMITEM"), "No")
+        self.assertEqual(debit_entry.findtext("REMOVEZEROENTRIES"), "No")
+        self.assertEqual(debit_entry.findtext("ISPARTYLEDGER"), "No")
 
         self.assertEqual(credit_entry.findtext("LEDGERNAME"), "Customer Account")
-        self.assertEqual(credit_entry.findtext("ISDEEMEDPOSITIVE"), "Yes")
-        self.assertEqual(credit_entry.findtext("AMOUNT"), "-1500.00")
+        self.assertEqual(credit_entry.findtext("ISDEEMEDPOSITIVE"), "No")
+        self.assertEqual(credit_entry.findtext("AMOUNT"), "1500.00")
+        self.assertEqual(credit_entry.findtext("LEDGERFROMITEM"), "No")
+        self.assertEqual(credit_entry.findtext("REMOVEZEROENTRIES"), "No")
+        self.assertEqual(credit_entry.findtext("ISPARTYLEDGER"), "No")
 
     def test_validate_transactions_for_export_rejects_invalid_vouchers(self):
         invalid = Transaction(

@@ -177,6 +177,18 @@ def validate_transactions_for_export(transactions: List[Transaction]) -> None:
         raise ValueError("; ".join(errors))
 
 
+def _append_ledger_entry(voucher, ledger_name: str, is_deemed_positive: str, amount: float) -> None:
+    entry = ET.SubElement(voucher, "ALLLEDGERENTRIES.LIST")
+    ET.SubElement(entry, "LEDGERNAME").text = ledger_name
+    ET.SubElement(entry, "GSTCLASS")
+    ET.SubElement(entry, "ISDEEMEDPOSITIVE").text = is_deemed_positive
+    ET.SubElement(entry, "LEDGERFROMITEM").text = "No"
+    ET.SubElement(entry, "REMOVEZEROENTRIES").text = "No"
+    ET.SubElement(entry, "ISPARTYLEDGER").text = "No"
+    ET.SubElement(entry, "PARTYLEDGERNAME")
+    ET.SubElement(entry, "AMOUNT").text = f"{amount:.2f}"
+
+
 def build_tally_xml(transactions: List[Transaction]) -> bytes:
     validate_transactions_for_export(transactions)
     envelope = ET.Element("ENVELOPE")
@@ -216,16 +228,10 @@ def build_tally_xml(transactions: List[Transaction]) -> bytes:
         )
         ET.SubElement(voucher, "VOUCHERTYPENAME").text = voucher_type
         ET.SubElement(voucher, "EFFECTIVEDATE").text = normalize_date_for_tally(transaction.date)
+        ET.SubElement(voucher, "HASCASHFLOW").text = "No"
 
-        debit_entry = ET.SubElement(voucher, "ALLLEDGERENTRIES.LIST")
-        ET.SubElement(debit_entry, "LEDGERNAME").text = debit_ledger
-        ET.SubElement(debit_entry, "ISDEEMEDPOSITIVE").text = "No"
-        ET.SubElement(debit_entry, "AMOUNT").text = f"{amount:.2f}"
-
-        credit_entry = ET.SubElement(voucher, "ALLLEDGERENTRIES.LIST")
-        ET.SubElement(credit_entry, "LEDGERNAME").text = credit_ledger
-        ET.SubElement(credit_entry, "ISDEEMEDPOSITIVE").text = "Yes"
-        ET.SubElement(credit_entry, "AMOUNT").text = f"{-amount:.2f}"
+        _append_ledger_entry(voucher, debit_ledger, "Yes", -amount)
+        _append_ledger_entry(voucher, credit_ledger, "No", amount)
 
     return ET.tostring(envelope, encoding="utf-8", xml_declaration=True)
 
