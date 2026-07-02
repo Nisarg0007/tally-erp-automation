@@ -38,20 +38,20 @@ class TradeXmlTests(unittest.TestCase):
         self.assertEqual(inventory_entry.findtext("RATE"), "1000.00/Nos")
         self.assertEqual(inventory_entry.findtext("ACTUALQTY"), " 10 Nos")
 
-    def test_build_trade_voucher_xml_creates_sales_voucher_with_sales_ledger_allocation(self):
+    def test_build_trade_voucher_xml_creates_sales_voucher_with_balanced_ledger_entries(self):
         payload = build_trade_voucher_xml([
             {
                 "action": "Sell",
-                "stock_code": "TCS",
-                "quantity": Decimal("5"),
-                "price": Decimal("3500"),
-                "total_amount": Decimal("17500"),
-                "tally_date": "20240630",
-                "narration": "Sell TCS",
+                "stock_code": "BHAPET",
+                "quantity": Decimal("120"),
+                "price": Decimal("300.50"),
+                "total_amount": Decimal("34617.02"),
+                "tally_date": "20260629",
+                "narration": "Sell BHAPET",
                 "party_ledger": "ICICI  Bank  Ltd -  Saving A/c",
                 "charges_ledger": "Brokerage & Charges",
                 "status": "Approved",
-                "charge_posting_mode": "separate",
+                "charge_posting_mode": "include",
             }
         ])
         root = ET.fromstring(payload)
@@ -59,10 +59,23 @@ class TradeXmlTests(unittest.TestCase):
         self.assertIsNotNone(voucher)
         self.assertEqual(voucher.attrib.get("VCHTYPE"), "Sales")
         self.assertEqual(voucher.findtext("VOUCHERTYPENAME"), "Sales")
+
         inventory_entry = voucher.find("ALLINVENTORYENTRIES.LIST")
         self.assertIsNotNone(inventory_entry)
         self.assertEqual(inventory_entry.findtext("ACCOUNTINGALLOCATIONS.LIST/LEDGERNAME"), "Equity Investment-Sales")
-        self.assertEqual(inventory_entry.findtext("ACCOUNTINGALLOCATIONS.LIST/AMOUNT"), "17500.00")
+        self.assertEqual(inventory_entry.findtext("ACCOUNTINGALLOCATIONS.LIST/AMOUNT"), "-34617.02")
+        self.assertEqual(voucher.findtext("LEDGERENTRIES.LIST/LEDGERNAME"), "ICICI  Bank  Ltd -  Saving A/c")
+        self.assertEqual(voucher.findtext("LEDGERENTRIES.LIST/AMOUNT"), "34617.02")
+
+        total_amount = Decimal("0.00")
+        for entry in voucher.findall("LEDGERENTRIES.LIST"):
+            total_amount += Decimal(entry.findtext("AMOUNT") or "0")
+        for entry in voucher.findall("ALLINVENTORYENTRIES.LIST"):
+            accounting_amount = entry.find("ACCOUNTINGALLOCATIONS.LIST")
+            if accounting_amount is not None:
+                total_amount += Decimal(accounting_amount.findtext("AMOUNT") or "0")
+
+        self.assertEqual(total_amount, Decimal("0.00"))
 
     def test_build_trade_voucher_xml_balances_purchase_ledger_entries(self):
         payload = build_trade_voucher_xml([

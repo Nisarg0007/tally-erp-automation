@@ -699,13 +699,16 @@ def bulk_update_trade_rows(data: BulkTradeRowUpdate):
             if not row:
                 continue
             for field in [
-                "date", "stock_code", "action", "quantity", "price", "total_amount",
+                "stock_code", "action", "quantity", "price", "total_amount",
                 "calculated_trade_value", "charges", "party_ledger", "purchase_ledger",
                 "sales_ledger", "charges_ledger", "narration", "status"
             ]:
                 value = getattr(item, field, None)
                 if value is not None:
                     setattr(row, field, value)
+            if item.date is not None:
+                row.date = item.date
+                row.tally_date = normalize_date_for_tally(item.date) if item.date else ""
             if item.include_charges_in_stock_value is not None:
                 row.include_charges_in_stock_value = "Yes" if item.include_charges_in_stock_value else "No"
             if item.charge_posting_mode is not None:
@@ -757,13 +760,16 @@ def update_trade_row(row_id: int, data: TradeRowUpdate):
         if not row:
             raise HTTPException(status_code=404, detail="Trade row not found")
         for field in [
-            "date", "stock_code", "action", "quantity", "price", "total_amount",
+            "stock_code", "action", "quantity", "price", "total_amount",
             "calculated_trade_value", "charges", "party_ledger", "purchase_ledger",
             "sales_ledger", "charges_ledger", "narration", "status"
         ]:
             value = getattr(data, field, None)
             if value is not None:
                 setattr(row, field, value)
+        if data.date is not None:
+            row.date = data.date
+            row.tally_date = normalize_date_for_tally(data.date) if data.date else ""
         if data.include_charges_in_stock_value is not None:
             row.include_charges_in_stock_value = "Yes" if data.include_charges_in_stock_value else "No"
         if data.charge_posting_mode is not None:

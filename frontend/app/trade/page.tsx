@@ -1,7 +1,7 @@
 "use client";
 
 import axios from "axios";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import StepProgress from "@/components/StepProgress";
 import SectionHeader from "@/components/SectionHeader";
 import { API_BASE_URL } from "@/lib/api";
@@ -50,6 +50,8 @@ export default function TradePage() {
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [partyLedgerDefault, setPartyLedgerDefault] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [tradeLedgerDefault, setTradeLedgerDefault] = useState("");
   const [chargesLedgerDefault, setChargesLedgerDefault] = useState("");
 
@@ -73,8 +75,7 @@ export default function TradePage() {
     }
   };
 
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const uploadTradeFile = async (file: File | null) => {
     if (!file) {
       return;
     }
@@ -94,8 +95,29 @@ export default function TradePage() {
       setToast(typeof detail === "string" ? detail : "Upload failed.");
     } finally {
       setUploading(false);
-      event.target.value = "";
     }
+  };
+
+  const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    await uploadTradeFile(file);
+    event.target.value = "";
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(true);
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+  };
+
+  const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+    await uploadTradeFile(event.dataTransfer.files?.[0] || null);
   };
 
   const loadLedgers = async () => {
@@ -195,12 +217,29 @@ export default function TradePage() {
             <p className="text-sm uppercase tracking-[0.25em] text-indigo-600">Import</p>
             <h2 className="text-2xl font-semibold text-slate-900">Upload trade-book file</h2>
           </div>
-          <label className="inline-flex cursor-pointer items-center justify-center rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">
-            <span>{uploading ? "Uploading..." : "Choose PDF or Excel"}</span>
-            <input type="file" accept=".pdf,.xlsx,.xls" className="hidden" onChange={handleUpload} />
-          </label>
         </div>
         <p className="mt-4 text-sm leading-7 text-slate-600">The importer will parse Buy/Sell rows, calculate trade value and charges, and prepare them for approval before export.</p>
+
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`mt-6 flex cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-10 text-center transition ${
+            dragActive ? "border-indigo-500 bg-indigo-50" : "border-slate-300 bg-slate-50 hover:border-indigo-400 hover:bg-slate-100"
+          }`}
+        >
+          <svg className="h-10 w-10 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 0 1-.88-7.9A5.5 5.5 0 0 1 19 9.5a5.5 5.5 0 0 1-1.1 10.9H7Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="m12 13 2.5 2.5M12 13l-2.5 2.5M12 13v8" />
+          </svg>
+          <p className="mt-4 text-sm font-semibold text-slate-800">{dragActive ? "Drop your trade-book file here" : "Drag and drop your PDF or Excel here, or click to browse"}</p>
+          <p className="mt-2 text-sm text-slate-500">Accepted formats: PDF or Excel (.xlsx/.xls)</p>
+          <input ref={fileInputRef} type="file" accept=".pdf,.xlsx,.xls" className="hidden" onChange={handleUpload} />
+          <div className="mt-4 inline-flex items-center justify-center rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">
+            {uploading ? "Uploading..." : "Choose PDF or Excel"}
+          </div>
+        </div>
       </section>
 
       <section className="rounded-[2rem] bg-slate-950 p-8 text-white shadow-xl shadow-slate-900/30">
@@ -296,7 +335,7 @@ export default function TradePage() {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id} className="even:bg-slate-50">
-                  <td className="border-b px-3 py-3 text-sm text-slate-700"><input className="w-full rounded-xl border border-slate-200 px-2 py-2" value={row.date ?? ""} onChange={(e) => setRows((prev) => prev.map((item) => item.id === row.id ? { ...item, date: e.target.value } : item))} /></td>
+                  <td className="border-b px-3 py-3 text-sm text-slate-700"><input type="date" className="w-full rounded-xl border border-slate-200 px-2 py-2" value={row.date ? (() => { const match = row.date.match(/^(\d{4})-(\d{2})-(\d{2})$/); if (match) return row.date; const dmy = row.date.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/); if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`; const tally = row.date.match(/^(\d{8})$/); if (tally) return `${tally[1].slice(0, 4)}-${tally[1].slice(4, 6)}-${tally[1].slice(6, 8)}`; return ""; })() : ""} onChange={(e) => setRows((prev) => prev.map((item) => item.id === row.id ? { ...item, date: e.target.value } : item))} /></td>
                   <td className="border-b px-3 py-3 text-sm text-slate-700"><input className="w-full rounded-xl border border-slate-200 px-2 py-2" value={row.stock_code ?? ""} onChange={(e) => setRows((prev) => prev.map((item) => item.id === row.id ? { ...item, stock_code: e.target.value } : item))} /></td>
                   <td className="border-b px-3 py-3 text-sm text-slate-700"><select className="w-full rounded-xl border border-slate-200 px-2 py-2" value={row.action ?? "Buy"} onChange={(e) => setRows((prev) => prev.map((item) => item.id === row.id ? { ...item, action: e.target.value } : item))}><option value="Buy">Buy</option><option value="Sell">Sell</option></select></td>
                   <td className="border-b px-3 py-3 text-sm text-slate-700"><input className="w-full rounded-xl border border-slate-200 px-2 py-2" value={normalizeNumeric(row.quantity)} onChange={(e) => setRows((prev) => prev.map((item) => item.id === row.id ? { ...item, quantity: e.target.value } : item))} /></td>

@@ -73,43 +73,70 @@ def _append_inventory_allocation(parent: ET.Element, stock_code: str, quantity: 
     return entry
 
 
-def _append_sales_inventory_entry(parent: ET.Element, stock_code: str, quantity: Decimal, amount: Decimal, rate: Decimal) -> ET.Element:
+def _append_sales_inventory_entry(parent: ET.Element, stock_code: str, quantity: Decimal, amount: Decimal, rate: Decimal, tally_date: str) -> ET.Element:
     entry = ET.SubElement(parent, "ALLINVENTORYENTRIES.LIST")
     _ensure_text(entry, "STOCKITEMNAME", stock_code)
-    _ensure_text(entry, "ISDEEMEDPOSITIVE", "Yes")
+    _ensure_text(entry, "ISDEEMEDPOSITIVE", "No")
     _ensure_text(entry, "RATE", _format_rate(rate))
-    _ensure_text(entry, "AMOUNT", _format_decimal(amount))
+    _ensure_text(entry, "AMOUNT", _format_decimal(-amount))
     _ensure_text(entry, "ACTUALQTY", _format_quantity(quantity))
     _ensure_text(entry, "BILLEDQTY", _format_quantity(quantity))
-    _ensure_text(entry, "MFDON", "No")
+    _ensure_text(entry, "MFDON", tally_date)
     _ensure_text(entry, "GODOWNNAME", GODOWN_NAME)
     _ensure_text(entry, "BATCHNAME", BATCH_NAME)
     _ensure_text(entry, "DESTINATIONGODOWNNAME", GODOWN_NAME)
     accounting = ET.SubElement(entry, "ACCOUNTINGALLOCATIONS.LIST")
     _ensure_text(accounting, "LEDGERNAME", "Equity Investment-Sales")
-    _ensure_text(accounting, "ISDEEMEDPOSITIVE", "Yes")
-    _ensure_text(accounting, "AMOUNT", _format_decimal(amount))
+    _ensure_text(accounting, "ISDEEMEDPOSITIVE", "No")
+    _ensure_text(accounting, "AMOUNT", _format_decimal(-amount))
     batch = ET.SubElement(entry, "BATCHALLOCATIONS.LIST")
+    _ensure_text(batch, "MFDON", tally_date)
     _ensure_text(batch, "GODOWNNAME", GODOWN_NAME)
     _ensure_text(batch, "BATCHNAME", BATCH_NAME)
+    _ensure_text(batch, "DESTINATIONGODOWNNAME", GODOWN_NAME)
+    _ensure_text(batch, "INDENTNO", "")
+    _ensure_text(batch, "ORDERNO", "")
+    _ensure_text(batch, "TRACKINGNUMBER", "")
+    _ensure_text(batch, "AMOUNT", _format_decimal(-amount))
     _ensure_text(batch, "ACTUALQTY", _format_quantity(quantity))
     _ensure_text(batch, "BILLEDQTY", _format_quantity(quantity))
     return entry
 
 
 def _validate_voucher_ledger_balance(voucher: ET.Element, voucher_type: str) -> None:
-    if voucher_type != "Purchase":
+    if voucher_type == "Purchase":
+        total_amount = Decimal("0.00")
+        for entry in voucher.findall("ALLLEDGERENTRIES.LIST"):
+            amount_text = entry.findtext("AMOUNT")
+            if amount_text is None:
+                continue
+            total_amount += Decimal(amount_text)
+
+        if total_amount != Decimal("0.00"):
+            raise ValueError(f"Purchase voucher ledger amounts must balance to zero, got {total_amount}")
+        return
+
+    if voucher_type != "Sales":
         return
 
     total_amount = Decimal("0.00")
-    for entry in voucher.findall("ALLLEDGERENTRIES.LIST"):
+    for entry in voucher.findall("LEDGERENTRIES.LIST"):
         amount_text = entry.findtext("AMOUNT")
         if amount_text is None:
             continue
         total_amount += Decimal(amount_text)
 
+    for entry in voucher.findall("ALLINVENTORYENTRIES.LIST"):
+        accounting_allocation = entry.find("ACCOUNTINGALLOCATIONS.LIST")
+        if accounting_allocation is None:
+            continue
+        amount_text = accounting_allocation.findtext("AMOUNT")
+        if amount_text is None:
+            continue
+        total_amount += Decimal(amount_text)
+
     if total_amount != Decimal("0.00"):
-        raise ValueError(f"Voucher ledger amounts must balance to zero, got {total_amount}")
+        raise ValueError(f"Sales voucher ledger amounts must balance to zero, got {total_amount}")
 
 
 def _build_trade_envelope(vouchers: List[dict]) -> bytes:
@@ -150,12 +177,8 @@ def _build_trade_envelope(vouchers: List[dict]) -> bytes:
             stock_amount = row["stock_amount"]
             stock_quantity = row["quantity"]
             stock_rate = row["price"]
-            _append_sales_inventory_entry(voucher, row["stock_code"], stock_quantity, stock_amount, stock_rate)
-            if row.get("charge_posting_mode") == "separate":
-                _append_ledger_entry(voucher, row["charges_ledger"], "No", row["charges_value"], "No", "LEDGERENTRIES.LIST")
-                _append_ledger_entry(voucher, row["party_ledger"], "Yes", row["party_value"], "Yes", "LEDGERENTRIES.LIST")
-            else:
-                _append_ledger_entry(voucher, row["party_ledger"], "Yes", row["total_amount"], "Yes", "LEDGERENTRIES.LIST")
+            _append_sales_inventory_entry(voucher, row["stock_code"], stock_quantity, stock_amount, stock_rate, row["tally_date"])
+            _append_ledger_entry(voucher, row["party_ledger"], "Yes", row["total_amount"], "Yes", "LEDGERENTRIES.LIST")
             _validate_voucher_ledger_balance(voucher, row["voucher_type"])
 
     return ET.tostring(envelope, encoding="utf-8", xml_declaration=True)
