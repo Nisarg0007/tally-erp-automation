@@ -108,34 +108,39 @@ def _append_purchase_inventory_allocation(
     return entry
 
 
-def _append_sales_inventory_allocation(
+def _append_sales_inventory_entry(
     parent: ET.Element,
     stock_code: str,
     quantity: Decimal,
     amount: Decimal,
     rate: Decimal,
     tally_date: str,
+    sales_ledger: str,
 ) -> ET.Element:
     """
-    Exact structure from the manual Sales voucher:
-
-    Sales ledger entry:
-      AMOUNT = negative
-      INVENTORYALLOCATIONS.LIST is nested inside it
-
-    Inventory:
-      AMOUNT = negative
-      ACTUALQTY / BILLEDQTY = negative
+    Match the manually exported Tally Sales Invoice format:
+    - ALLINVENTORYENTRIES.LIST directly under VOUCHER
+    - positive inventory/accounting amounts
+    - normal positive quantity
     """
-    entry = ET.SubElement(parent, "INVENTORYALLOCATIONS.LIST")
+    entry = ET.SubElement(parent, "ALLINVENTORYENTRIES.LIST")
 
     _ensure_text(entry, "STOCKITEMNAME", stock_code)
     _ensure_text(entry, "ISDEEMEDPOSITIVE", "No")
     _ensure_text(entry, "ISAUTONEGATE", "No")
     _ensure_text(entry, "RATE", _format_rate(rate))
-    _ensure_text(entry, "AMOUNT", _format_decimal(-amount))
-    _ensure_text(entry, "ACTUALQTY", _format_quantity(quantity, negative=True))
-    _ensure_text(entry, "BILLEDQTY", _format_quantity(quantity, negative=True))
+    _ensure_text(entry, "AMOUNT", _format_decimal(amount))
+    _ensure_text(entry, "ACTUALQTY", _format_quantity(quantity))
+    _ensure_text(entry, "BILLEDQTY", _format_quantity(quantity))
+
+    accounting = ET.SubElement(entry, "ACCOUNTINGALLOCATIONS.LIST")
+    _ensure_text(accounting, "LEDGERNAME", sales_ledger)
+    _ensure_text(accounting, "GSTCLASS", "")
+    _ensure_text(accounting, "ISDEEMEDPOSITIVE", "No")
+    _ensure_text(accounting, "LEDGERFROMITEM", "No")
+    _ensure_text(accounting, "REMOVEZEROENTRIES", "No")
+    _ensure_text(accounting, "ISPARTYLEDGER", "No")
+    _ensure_text(accounting, "AMOUNT", _format_decimal(amount))
 
     batch = ET.SubElement(entry, "BATCHALLOCATIONS.LIST")
     _ensure_text(batch, "MFDON", tally_date)
@@ -145,12 +150,11 @@ def _append_sales_inventory_allocation(
     _ensure_text(batch, "INDENTNO", "")
     _ensure_text(batch, "ORDERNO", "")
     _ensure_text(batch, "TRACKINGNUMBER", "")
-    _ensure_text(batch, "AMOUNT", _format_decimal(-amount))
-    _ensure_text(batch, "ACTUALQTY", _format_quantity(quantity, negative=True))
-    _ensure_text(batch, "BILLEDQTY", _format_quantity(quantity, negative=True))
+    _ensure_text(batch, "AMOUNT", _format_decimal(amount))
+    _ensure_text(batch, "ACTUALQTY", _format_quantity(quantity))
+    _ensure_text(batch, "BILLEDQTY", _format_quantity(quantity))
 
     return entry
-
 
 def _validate_voucher_ledger_balance(
     voucher: ET.Element,
@@ -158,16 +162,28 @@ def _validate_voucher_ledger_balance(
 ) -> None:
     total = Decimal("0.00")
 
-    for entry in voucher.findall("ALLLEDGERENTRIES.LIST"):
-        amount_text = entry.findtext("AMOUNT")
-        if amount_text:
-            total += Decimal(amount_text)
+    if voucher_type == "Sales":
+        for entry in voucher.findall("LEDGERENTRIES.LIST"):
+            amount_text = entry.findtext("AMOUNT")
+            if amount_text:
+                total += Decimal(amount_text)
+
+        for inventory in voucher.findall("ALLINVENTORYENTRIES.LIST"):
+            accounting = inventory.find("ACCOUNTINGALLOCATIONS.LIST")
+            if accounting is not None:
+                amount_text = accounting.findtext("AMOUNT")
+                if amount_text:
+                    total += Decimal(amount_text)
+    else:
+        for entry in voucher.findall("ALLLEDGERENTRIES.LIST"):
+            amount_text = entry.findtext("AMOUNT")
+            if amount_text:
+                total += Decimal(amount_text)
 
     if _quantize_money(total) != Decimal("0.00"):
         raise ValueError(
             f"{voucher_type} voucher ledger amounts must balance to zero, got {total}"
         )
-
 
 def _build_trade_envelope(vouchers: List[dict]) -> bytes:
     envelope = ET.Element("ENVELOPE")
@@ -205,6 +221,7 @@ def _build_trade_envelope(vouchers: List[dict]) -> bytes:
         _ensure_text(voucher, "VOUCHERTYPENAME", row["voucher_type"])
         _ensure_text(voucher, "EFFECTIVEDATE", row["tally_date"])
         _ensure_text(voucher, "HASCASHFLOW", "Yes")
+        _ensure_text(voucher, "ISINVOICE", "Yes")
         _ensure_text(voucher, "REFERENCE", row["stock_code"])
         _ensure_text(voucher, "PARTYLEDGERNAME", row["party_ledger"])
 
@@ -238,33 +255,26 @@ def _build_trade_envelope(vouchers: List[dict]) -> bytes:
             )
 
         elif row["voucher_type"] == "Sales":
-            # Exact manual Sales structure:
-            # Bank / party: positive
-            # Sales ledger: negative
-            # Inventory allocation nested in Sales ledger: negative
+            # Match manual Sales Invoice XML:
+            # Bank / party ledger: negative amount in LEDGERENTRIES.LIST
+            # Sales ledger: positive amount inside ACCOUNTINGALLOCATIONS.LIST
             _append_ledger_entry(
                 voucher,
                 row["party_ledger"],
                 "Yes",
-                row["voucher_amount"],
-                is_party_ledger="Yes",
-            )
-
-            sales_entry = _append_ledger_entry(
-                voucher,
-                row["sales_ledger"],
-                "No",
                 -row["voucher_amount"],
-                is_party_ledger="No",
+                is_party_ledger="Yes",
+                tag_name="LEDGERENTRIES.LIST",
             )
 
-            _append_sales_inventory_allocation(
-                sales_entry,
+            _append_sales_inventory_entry(
+                voucher,
                 row["stock_code"],
                 row["quantity"],
                 row["voucher_amount"],
                 row["price"],
                 row["tally_date"],
+                row["sales_ledger"],
             )
 
         else:
