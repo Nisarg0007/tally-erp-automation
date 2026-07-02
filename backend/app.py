@@ -17,8 +17,26 @@ from models import Transaction, Ledger
 from parser import parse_pdf_statement, parse_excel_statement, UnsupportedStatementFormatError
 from schemas import TransactionCreate, TransactionUpdate, TransactionUpdateWithId, BulkTransactionUpdate
 from tally_import import read_ledgers
+from trade_models import TradeRow
+from trade_parser import UnsupportedTradeBookError, parse_trade_book_file
+from trade_schemas import TradeRowCreate, TradeRowUpdate, TradeRowUpdateWithId, BulkTradeRowUpdate
+from trade_xml_generator import build_trade_stock_master_xml, build_trade_voucher_xml
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_trade_table_columns():
+    if engine.dialect.name == "sqlite":
+        with engine.begin() as conn:
+            result = conn.execute(text("PRAGMA table_info(trade_rows);"))
+            columns = [row[1] for row in result]
+            if "include_charges_in_stock_value" not in columns:
+                conn.execute(text("ALTER TABLE trade_rows ADD COLUMN include_charges_in_stock_value VARCHAR DEFAULT 'No'"))
+            if "charge_posting_mode" not in columns:
+                conn.execute(text("ALTER TABLE trade_rows ADD COLUMN charge_posting_mode VARCHAR DEFAULT 'separate'"))
+
+
+ensure_trade_table_columns()
 
 
 def ensure_transaction_source_column():
@@ -337,6 +355,30 @@ def build_transaction_payload(transaction: Transaction) -> dict:
     }
 
 
+def build_trade_row_payload(row: TradeRow) -> dict:
+    return {
+        "id": row.id,
+        "date": row.date,
+        "tally_date": row.tally_date,
+        "stock_code": row.stock_code,
+        "action": row.action,
+        "quantity": float(row.quantity) if row.quantity is not None else None,
+        "price": float(row.price) if row.price is not None else None,
+        "total_amount": float(row.total_amount) if row.total_amount is not None else None,
+        "calculated_trade_value": float(row.calculated_trade_value) if row.calculated_trade_value is not None else None,
+        "charges": float(row.charges) if row.charges is not None else None,
+        "party_ledger": row.party_ledger,
+        "purchase_ledger": row.purchase_ledger,
+        "sales_ledger": row.sales_ledger,
+        "charges_ledger": row.charges_ledger,
+        "narration": row.narration,
+        "status": row.status,
+        "source": row.source,
+        "include_charges_in_stock_value": row.include_charges_in_stock_value == "Yes",
+        "charge_posting_mode": row.charge_posting_mode,
+    }
+
+
 @app.get("/")
 def home():
     return {"status": "running"}
@@ -582,6 +624,251 @@ def get_stats():
         approved = db.query(Transaction).filter(Transaction.status == "Approved").count()
         exported = db.query(Transaction).filter(Transaction.status == "Exported").count()
         return {"total": total, "pending": pending, "approved": approved, "exported": exported}
+    finally:
+        db.close()
+
+
+@app.post("/trade/import")
+async def import_trade_rows(file: UploadFile = File(...)):
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".pdf", ".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Trade-book import supports PDF and Excel files only")
+
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    try:
+        rows = parse_trade_book_file(file_path)
+    except UnsupportedTradeBookError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No trade-book rows were parsed")
+
+    db = SessionLocal()
+    try:
+        db.query(TradeRow).delete()
+        for row in rows:
+            db.add(TradeRow(
+                date=row["date"],
+                tally_date=row["tally_date"],
+                stock_code=row["stock_code"],
+                action=row["action"],
+                quantity=row["quantity"],
+                price=row["price"],
+                total_amount=row["total_amount"],
+                calculated_trade_value=row["calculated_trade_value"],
+                charges=row["charges"],
+                party_ledger=row["party_ledger"],
+                purchase_ledger=row["purchase_ledger"],
+                sales_ledger=row["sales_ledger"],
+                charges_ledger=row["charges_ledger"],
+                narration=row["narration"],
+                status=row["status"],
+                source=row["source"],
+                include_charges_in_stock_value="Yes" if row.get("include_charges_in_stock_value") else "No",
+                charge_posting_mode=row.get("charge_posting_mode", "separate"),
+            ))
+        db.commit()
+        return {"success": True, "count": len(rows)}
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        db.close()
+
+
+@app.get("/trade/rows")
+def get_trade_rows():
+    db = SessionLocal()
+    try:
+        rows = db.query(TradeRow).order_by(TradeRow.id).all()
+        return [build_trade_row_payload(row) for row in rows]
+    finally:
+        db.close()
+
+
+@app.put("/trade/rows/bulk")
+def bulk_update_trade_rows(data: BulkTradeRowUpdate):
+    db = SessionLocal()
+    try:
+        updated = 0
+        for item in data.rows:
+            row = db.query(TradeRow).filter(TradeRow.id == item.id).first()
+            if not row:
+                continue
+            for field in [
+                "date", "stock_code", "action", "quantity", "price", "total_amount",
+                "calculated_trade_value", "charges", "party_ledger", "purchase_ledger",
+                "sales_ledger", "charges_ledger", "narration", "status"
+            ]:
+                value = getattr(item, field, None)
+                if value is not None:
+                    setattr(row, field, value)
+            if item.include_charges_in_stock_value is not None:
+                row.include_charges_in_stock_value = "Yes" if item.include_charges_in_stock_value else "No"
+            if item.charge_posting_mode is not None:
+                row.charge_posting_mode = item.charge_posting_mode
+            updated += 1
+        db.commit()
+        return {"success": True, "updated": updated}
+    finally:
+        db.close()
+
+
+@app.post("/trade/rows")
+def create_trade_row(data: TradeRowCreate):
+    db = SessionLocal()
+    try:
+        row = TradeRow(
+            date=data.date,
+            tally_date="",
+            stock_code=data.stock_code,
+            action=data.action,
+            quantity=data.quantity,
+            price=data.price,
+            total_amount=data.total_amount,
+            calculated_trade_value=data.calculated_trade_value,
+            charges=data.charges,
+            party_ledger=data.party_ledger,
+            purchase_ledger=data.purchase_ledger,
+            sales_ledger=data.sales_ledger,
+            charges_ledger=data.charges_ledger,
+            narration=data.narration,
+            status=data.status or "Pending",
+            source=data.source or "manual",
+            include_charges_in_stock_value="Yes" if data.include_charges_in_stock_value else "No",
+            charge_posting_mode=data.charge_posting_mode or "separate",
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return {"success": True, "row": build_trade_row_payload(row)}
+    finally:
+        db.close()
+
+
+@app.put("/trade/rows/{row_id}")
+def update_trade_row(row_id: int, data: TradeRowUpdate):
+    db = SessionLocal()
+    try:
+        row = db.query(TradeRow).filter(TradeRow.id == row_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Trade row not found")
+        for field in [
+            "date", "stock_code", "action", "quantity", "price", "total_amount",
+            "calculated_trade_value", "charges", "party_ledger", "purchase_ledger",
+            "sales_ledger", "charges_ledger", "narration", "status"
+        ]:
+            value = getattr(data, field, None)
+            if value is not None:
+                setattr(row, field, value)
+        if data.include_charges_in_stock_value is not None:
+            row.include_charges_in_stock_value = "Yes" if data.include_charges_in_stock_value else "No"
+        if data.charge_posting_mode is not None:
+            row.charge_posting_mode = data.charge_posting_mode
+        db.commit()
+        return {"success": True}
+    finally:
+        db.close()
+
+
+@app.delete("/trade/rows/{row_id}")
+def delete_trade_row(row_id: int):
+    db = SessionLocal()
+    try:
+        row = db.query(TradeRow).filter(TradeRow.id == row_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Trade row not found")
+        db.delete(row)
+        db.commit()
+        return {"success": True}
+    finally:
+        db.close()
+
+
+@app.delete("/trade/rows")
+def clear_trade_rows():
+    db = SessionLocal()
+    try:
+        db.query(TradeRow).delete()
+        db.commit()
+        return {"success": True}
+    finally:
+        db.close()
+
+
+@app.post("/trade/validate-stock-masters")
+def validate_trade_stock_masters():
+    db = SessionLocal()
+    try:
+        rows = db.query(TradeRow).filter(TradeRow.status == "Approved").all()
+        stock_codes = sorted({row.stock_code for row in rows if row.stock_code})
+        missing = []
+        for stock_code in stock_codes:
+            if not stock_code:
+                continue
+            existing = db.query(Ledger).filter(Ledger.name == stock_code).first()
+            if existing is None:
+                missing.append(stock_code)
+        return {"success": True, "stock_items": stock_codes, "missing": missing}
+    finally:
+        db.close()
+
+
+@app.post("/trade/export")
+def export_trade_vouchers():
+    db = SessionLocal()
+    try:
+        rows = db.query(TradeRow).filter(TradeRow.status == "Approved").order_by(TradeRow.id).all()
+        if not rows:
+            raise HTTPException(status_code=404, detail="No approved trade rows available for export")
+
+        trade_rows = []
+        for row in rows:
+            if not row.stock_code:
+                continue
+            quantity = row.quantity or Decimal("0")
+            price = row.price or Decimal("0")
+            total_amount = row.total_amount or Decimal("0")
+            if quantity <= 0 or price <= 0 or total_amount <= 0:
+                continue
+            trade_rows.append({
+                "action": row.action or "Buy",
+                "stock_code": row.stock_code,
+                "quantity": quantity,
+                "price": price,
+                "total_amount": total_amount,
+                "tally_date": row.tally_date or row.date,
+                "narration": row.narration or f"{row.action} {row.stock_code}",
+                "party_ledger": row.party_ledger or "ICICI  Bank  Ltd -  Saving A/c",
+                "charges_ledger": row.charges_ledger or "Brokerage & Charges",
+                "status": row.status,
+                "charge_posting_mode": row.charge_posting_mode or "separate",
+            })
+        payload = build_trade_voucher_xml(trade_rows)
+        return StreamingResponse(
+            BytesIO(payload),
+            media_type="application/xml",
+            headers={"Content-Disposition": "attachment; filename=trade_vouchers.xml"},
+        )
+    finally:
+        db.close()
+
+
+@app.post("/trade/export-stock-masters")
+def export_trade_stock_masters():
+    db = SessionLocal()
+    try:
+        rows = db.query(TradeRow).filter(TradeRow.status == "Approved").all()
+        stock_codes = sorted({row.stock_code for row in rows if row.stock_code})
+        payload = build_trade_stock_master_xml([{"name": name, "group": "Equity Shares"} for name in stock_codes])
+        return StreamingResponse(
+            BytesIO(payload),
+            media_type="application/xml",
+            headers={"Content-Disposition": "attachment; filename=trade_stock_masters.xml"},
+        )
     finally:
         db.close()
 

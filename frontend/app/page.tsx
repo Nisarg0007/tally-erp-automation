@@ -87,6 +87,16 @@ export default function Home() {
           </Link>
 
           <Link
+            href="/trade"
+            className="group rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+          >
+            <h2 className="text-xl font-semibold text-slate-900">Trade Book Import</h2>
+            <p className="mt-3 text-slate-600 group-hover:text-slate-900">
+              Import equity trade-book PDFs or Excel files and export purchase/sales vouchers for Tally.
+            </p>
+          </Link>
+
+          <Link
             href="/export"
             className="group rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
           >

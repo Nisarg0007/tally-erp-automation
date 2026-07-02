@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const steps = [
   { label: "Upload", href: "/upload" },
   { label: "Ledgers", href: "/settings" },
+  { label: "Trade", href: "/trade" },
   { label: "Review", href: "/review" },
   { label: "Export", href: "/export" },
 ];
