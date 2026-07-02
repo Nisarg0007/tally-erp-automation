@@ -62,9 +62,13 @@ class TradeXmlTests(unittest.TestCase):
 
         inventory_entry = voucher.find("ALLINVENTORYENTRIES.LIST")
         self.assertIsNotNone(inventory_entry)
+        self.assertEqual(inventory_entry.findtext("ISDEEMEDPOSITIVE"), "Yes")
+        self.assertEqual(inventory_entry.findtext("AMOUNT"), "-34617.02")
         self.assertEqual(inventory_entry.findtext("ACCOUNTINGALLOCATIONS.LIST/LEDGERNAME"), "Equity Investment-Sales")
+        self.assertEqual(inventory_entry.findtext("ACCOUNTINGALLOCATIONS.LIST/ISDEEMEDPOSITIVE"), "No")
         self.assertEqual(inventory_entry.findtext("ACCOUNTINGALLOCATIONS.LIST/AMOUNT"), "-34617.02")
         self.assertEqual(voucher.findtext("LEDGERENTRIES.LIST/LEDGERNAME"), "ICICI  Bank  Ltd -  Saving A/c")
+        self.assertEqual(voucher.findtext("LEDGERENTRIES.LIST/ISDEEMEDPOSITIVE"), "Yes")
         self.assertEqual(voucher.findtext("LEDGERENTRIES.LIST/AMOUNT"), "34617.02")
 
         total_amount = Decimal("0.00")

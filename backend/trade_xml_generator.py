@@ -76,7 +76,7 @@ def _append_inventory_allocation(parent: ET.Element, stock_code: str, quantity: 
 def _append_sales_inventory_entry(parent: ET.Element, stock_code: str, quantity: Decimal, amount: Decimal, rate: Decimal, tally_date: str) -> ET.Element:
     entry = ET.SubElement(parent, "ALLINVENTORYENTRIES.LIST")
     _ensure_text(entry, "STOCKITEMNAME", stock_code)
-    _ensure_text(entry, "ISDEEMEDPOSITIVE", "No")
+    _ensure_text(entry, "ISDEEMEDPOSITIVE", "Yes")
     _ensure_text(entry, "RATE", _format_rate(rate))
     _ensure_text(entry, "AMOUNT", _format_decimal(-amount))
     _ensure_text(entry, "ACTUALQTY", _format_quantity(quantity))
