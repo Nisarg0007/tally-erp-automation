@@ -28,6 +28,10 @@ interface TradeRow {
   charge_posting_mode: string | null;
 }
 
+interface LedgerOption {
+  name: string;
+}
+
 const STATUS_OPTIONS = ["Pending", "Approved"];
 const CHARGE_MODE_OPTIONS = ["separate", "include"];
 
@@ -40,15 +44,20 @@ function normalizeNumeric(value: number | string | null | undefined) {
 
 export default function TradePage() {
   const [rows, setRows] = useState<TradeRow[]>([]);
+  const [ledgers, setLedgers] = useState<LedgerOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [partyLedgerDefault, setPartyLedgerDefault] = useState("");
+  const [tradeLedgerDefault, setTradeLedgerDefault] = useState("");
+  const [chargesLedgerDefault, setChargesLedgerDefault] = useState("");
 
   const approvedCount = useMemo(() => rows.filter((row) => row.status === "Approved").length, [rows]);
 
   useEffect(() => {
     loadRows();
+    loadLedgers();
   }, []);
 
   const loadRows = async () => {
@@ -87,6 +96,38 @@ export default function TradePage() {
       setUploading(false);
       event.target.value = "";
     }
+  };
+
+  const loadLedgers = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/ledgers`);
+      setLedgers((response.data || []).map((ledger: { name: string }) => ({ name: ledger.name })));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const applyDefaultLedgers = () => {
+    const nextRows = rows.map((row) => {
+      const nextRow = { ...row };
+      if (partyLedgerDefault.trim()) {
+        nextRow.party_ledger = partyLedgerDefault.trim();
+      }
+      if (tradeLedgerDefault.trim()) {
+        if ((row.action || "Buy").toLowerCase() === "sell") {
+          nextRow.sales_ledger = tradeLedgerDefault.trim();
+        } else {
+          nextRow.purchase_ledger = tradeLedgerDefault.trim();
+        }
+      }
+      if (chargesLedgerDefault.trim()) {
+        nextRow.charges_ledger = chargesLedgerDefault.trim();
+      }
+      return nextRow;
+    });
+
+    setRows(nextRows);
+    setToast("Defaults applied to all rows.");
   };
 
   const saveRows = async () => {
@@ -174,6 +215,55 @@ export default function TradePage() {
           </div>
         </div>
         <p className="mt-4 text-sm text-slate-300">{approvedCount} approved rows ready for export. Only approved rows are included in the generated vouchers.</p>
+
+        <div className="mt-6 grid gap-4 rounded-[1.5rem] border border-white/10 bg-white/10 p-4 lg:grid-cols-[1fr_1fr_1fr_auto]">
+          <div>
+            <label className="text-sm font-medium text-slate-300">Party ledger</label>
+            <select
+              className="mt-2 w-full rounded-2xl border border-white/10 bg-white/90 px-3 py-2 text-sm text-slate-900"
+              value={partyLedgerDefault}
+              onChange={(e) => setPartyLedgerDefault(e.target.value)}
+            >
+              <option value="">Select from imported ledgers</option>
+              {ledgers.map((ledger) => (
+                <option value={ledger.name} key={ledger.name}>{ledger.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-300">Purchase / Sales ledger</label>
+            <select
+              className="mt-2 w-full rounded-2xl border border-white/10 bg-white/90 px-3 py-2 text-sm text-slate-900"
+              value={tradeLedgerDefault}
+              onChange={(e) => setTradeLedgerDefault(e.target.value)}
+            >
+              <option value="">Select from imported ledgers</option>
+              {ledgers.map((ledger) => (
+                <option value={ledger.name} key={ledger.name}>{ledger.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-300">Charges ledger</label>
+            <select
+              className="mt-2 w-full rounded-2xl border border-white/10 bg-white/90 px-3 py-2 text-sm text-slate-900"
+              value={chargesLedgerDefault}
+              onChange={(e) => setChargesLedgerDefault(e.target.value)}
+            >
+              <option value="">Select from imported ledgers</option>
+              {ledgers.map((ledger) => (
+                <option value={ledger.name} key={ledger.name}>{ledger.name}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={applyDefaultLedgers}
+            className="inline-flex items-center justify-center rounded-2xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+          >
+            Apply to all rows
+          </button>
+        </div>
       </section>
 
       {toast && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{toast}</div>}
@@ -225,6 +315,7 @@ export default function TradePage() {
           </table>
         </div>
       )}
+
     </div>
   );
 }
